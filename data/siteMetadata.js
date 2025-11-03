@@ -1,9 +1,9 @@
 /** @type {import("pliny/config").PlinyConfig } */
 const siteMetadata = {
-  title: 'wersling\'s Blog',
-  author: 'wersling',
-  headerTitle: 'wersling\'s Blog',
-  description: 'wersling\'s blog about AI, RAG, and other cool stuff',
+  title: 'Sean\'s Blog',
+  author: 'SeanZou',
+  headerTitle: 'Sean\'s Blog',
+  description: 'Sean\'s blog about AI, RAG, and other cool stuff',
   language: 'zh-cn',
   theme: 'system', // system, dark or light
   siteUrl: 'https://blog.wersling.cn',
