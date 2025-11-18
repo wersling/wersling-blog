@@ -26,13 +26,29 @@ export const metadata: Metadata = {
     template: `%s | ${siteMetadata.title}`,
   },
   description: siteMetadata.description,
+  keywords: [
+    'AI',
+    'RAG',
+    '人工智能',
+    '机器学习',
+    '深度学习',
+    '技术博客',
+    '编程',
+    'Python',
+    'TypeScript',
+    'Next.js',
+    '个人成长',
+  ],
+  authors: [{ name: siteMetadata.author, url: siteMetadata.siteUrl }],
+  creator: siteMetadata.author,
+  publisher: siteMetadata.author,
   openGraph: {
     title: siteMetadata.title,
     description: siteMetadata.description,
     url: './',
     siteName: siteMetadata.title,
     images: [siteMetadata.socialBanner],
-    locale: 'en_US',
+    locale: 'zh_CN',
     type: 'website',
   },
   alternates: {
@@ -54,8 +70,13 @@ export const metadata: Metadata = {
   },
   twitter: {
     title: siteMetadata.title,
+    description: siteMetadata.description,
     card: 'summary_large_image',
     images: [siteMetadata.socialBanner],
+    creator: '@' + siteMetadata.author,
+  },
+  verification: {
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION,
   },
 }
 

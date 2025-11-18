@@ -1,9 +1,9 @@
 /** @type {import("pliny/config").PlinyConfig } */
 const siteMetadata = {
-  title: 'Sean\'s Blog',
+  title: 'Sean\'s Blog - AI、RAG 和技术分享',
   author: 'SeanZou',
   headerTitle: 'Sean\'s Blog',
-  description: 'Sean\'s blog about AI, RAG, and other cool stuff',
+  description: '分享 AI、RAG、机器学习、深度学习、编程技术和个人成长的技术博客。探索人工智能前沿技术，记录开发实践经验。',
   language: 'zh-cn',
   theme: 'system', // system, dark or light
   siteUrl: 'https://blog.wersling.cn',
