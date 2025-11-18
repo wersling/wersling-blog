@@ -1,7 +1,8 @@
 import { NewsletterAPI } from 'pliny/newsletter'
 import siteMetadata from '@/data/siteMetadata'
 
-export const dynamic = 'force-static'
+// 改为 force-dynamic 以支持订阅功能
+export const dynamic = 'force-dynamic'
 
 const handler = NewsletterAPI({
   // @ts-ignore
