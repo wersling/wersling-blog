@@ -69,7 +69,8 @@ module.exports = () => {
     reactStrictMode: true,
     trailingSlash: false,
     pageExtensions: ['ts', 'tsx', 'js', 'jsx', 'md', 'mdx'],
-    turbopack: {},    // 明确启用 Turbopack（Next.js 16 默认）
+    // 注意：contentlayer2 可能与 Turbopack 有兼容性问题
+    // 如果构建失败，Vercel 会自动回退到 webpack
     images: {
       remotePatterns: [
         {
