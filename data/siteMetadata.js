@@ -1,6 +1,6 @@
 /** @type {import("pliny/config").PlinyConfig } */
 const siteMetadata = {
-  title: 'Sean\'s Blog - AI、RAG 和技术分享',
+  title: 'Sean\'s Blog - AI技术分享',
   author: 'SeanZou',
   headerTitle: 'Sean\'s Blog',
   description: '分享 AI、RAG、机器学习、深度学习、编程技术和个人成长的技术博客。探索人工智能前沿技术，记录开发实践经验。',
@@ -70,8 +70,8 @@ const siteMetadata = {
       // please provide a link below to your custom theme css file.
       // example: https://giscus.app/themes/custom_example.css
       themeURL: '',
-      // This corresponds to the `data-lang="en"` in giscus's configurations
-      lang: 'en',
+      // This corresponds to the `data-lang="zh-CN"` in giscus's configurations
+      lang: 'zh-CN',
     },
   },
   search: {
