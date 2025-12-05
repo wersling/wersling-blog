@@ -69,9 +69,7 @@ module.exports = () => {
     reactStrictMode: true,
     trailingSlash: false,
     pageExtensions: ['ts', 'tsx', 'js', 'jsx', 'md', 'mdx'],
-    eslint: {
-      dirs: ['app', 'components', 'layouts', 'scripts'],
-    },
+    turbopack: {},    // 明确启用 Turbopack（Next.js 16 默认）
     images: {
       remotePatterns: [
         {
