@@ -101,6 +101,8 @@ module.exports = () => {
         },
       ]
     },
+    // 显式配置 turbopack（当前使用 webpack，添加空配置以消除警告）
+    turbopack: {},
     webpack: (config, options) => {
       config.module.rules.push({
         test: /\.svg$/,

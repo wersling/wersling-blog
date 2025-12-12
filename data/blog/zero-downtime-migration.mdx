@@ -1,0 +1,345 @@
+---
+title: 零停机迁移：从单体到微服务的架构重构
+date: '2025-12-12'
+tags: ['架构', '部署', 'Docker', 'Traefik', '微服务']
+draft: false
+summary: 当站点和服务逐步增多，管理开始混乱时，是时候重新思考架构了。记录一次从单体到微服务的零停机迁移过程。
+---
+
+## 为什么要迁移？
+
+去年开始在阿里云搞了个主机倒腾网站，最开始只有一个主站，所有东西都扔在一个 Docker Compose 文件里：Traefik、Nginx、数据库、应用……看起来挺整洁的。
+
+然后加了第二个站点，觉得也还好，再加一个配置就是了。
+
+再后来加了 Umami 做数据分析，又加了 PostgreSQL……
+
+某天准备更新其中一个小站点，执行 `docker compose restart`，突然意识到一个问题：**所有服务都要重启**。
+
+主站没问题，数据库要重启，Traefik 也要重启，正在访问其他站点的用户会瞬间断线。
+
+这就是单体架构的问题：**服务耦合在一起，牵一发而动全身**。
+
+## 旧架构的痛点
+
+### 1. 更新需要重启所有服务
+
+一个 Docker Compose 文件管理所有服务，任何一个服务的更新都会影响其他服务。想改个小站的配置？对不起，所有服务都得重启一遍。
+
+### 2. 配置混乱
+
+随着服务增多，`docker-compose.yml` 越来越长：
+
+```yaml
+services:
+  traefik:
+    # Traefik 配置
+  main:
+    # 主站配置
+  ottermath:
+    # 数学小站配置
+  umami:
+    # 分析工具配置
+  postgres:
+    # 数据库配置
+  # 还会有更多...
+```
+
+上百行的配置文件，找个配置项都得翻半天。
+
+### 3. 职责不清
+
+Traefik 作为全局反向代理，理应独立运行，但却和具体站点耦合在同一个 Compose 项目里。这就像把公司前台和某个部门绑在一起，不合理。
+
+### 4. 难以扩展
+
+想加新站点？得在已有的大文件里插入配置，还要小心别影响现有服务。时间久了，谁都不敢轻易动这个文件。
+
+## 新架构的设计思路
+
+痛定思痛，准备参考微服务的设计理念，重新设计整体架构：
+
+### 核心原则
+
+1. **全局只有一个 Traefik**：作为统一的流量入口
+2. **每个站点独立容器化**：有自己的 `docker-compose.yml`
+3. **通过 Docker labels 自动路由**：站点只需声明自己的域名，Traefik 自动发现
+4. **网络隔离**：公共服务用 `traefik-public` 网络，内部服务用独立网络
+
+### 架构图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Internet (HTTPS)                      │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+                    ┌──────────┐
+                    │ Traefik  │ :80 :443
+                    │  v3.0    │ (全局反向代理)
+                    └─────┬────┘
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                 │                 │
+        ▼                 ▼                 ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ wersling-main│  │  ottermath   │  │    umami     │
+│   (Nginx)    │  │   (Nginx)    │  │  (App+DB)    │
+│              │  │              │  │              │
+│ wersling.cn  │  │ ottermath.   │  │ umami.       │
+│              │  │ wersling.cn  │  │ wersling.cn  │
+└──────────────┘  └──────────────┘  └──────┬───────┘
+                                            │
+                                            ▼
+                                    ┌──────────────┐
+                                    │ PostgreSQL   │
+                                    │   (内部)     │
+                                    └──────────────┘
+```
+
+### 目录结构
+
+```
+/opt/
+├── traefik/                    # 全局 Traefik
+│   ├── docker-compose.yml
+│   └── traefik.yml
+└── sites/                      # 各个独立站点
+    ├── wersling-main/
+    │   └── docker-compose.yml
+    ├── ottermath/
+    │   └── docker-compose.yml
+    └── umami/
+        └── docker-compose.yml
+```
+
+每个站点都是独立的项目，互不干扰。
+
+## 迁移步骤
+
+### 1. 部署全局 Traefik
+
+首先创建独立的 Traefik 服务：
+
+```yaml
+# /opt/traefik/docker-compose.yml
+services:
+  traefik:
+    image: traefik:v3.0
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - traefik-certificates:/letsencrypt
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
+```
+
+关键配置：
+- 监听 Docker socket，自动发现服务
+- 挂载证书目录，持久化 Let's Encrypt 证书
+- 使用外部网络 `traefik-public`
+
+### 2. 迁移各个站点
+
+每个站点都有自己的 `docker-compose.yml`：
+
+```yaml
+# /opt/sites/wersling-main/docker-compose.yml
+services:
+  web:
+    build: .
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.wersling-main.rule=Host(`wersling.cn`)"
+      - "traefik.http.routers.wersling-main.entrypoints=websecure"
+      - "traefik.http.routers.wersling-main.tls.certresolver=letsencrypt"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
+```
+
+通过 Docker labels 声明路由规则：
+- `traefik.enable=true`：让 Traefik 发现这个服务
+- `Host(wersling.cn)`：域名匹配规则
+- `entrypoints=websecure`：使用 HTTPS 入口
+- `certresolver=letsencrypt`：自动申请 SSL 证书
+
+### 3. 零停机切换
+
+迁移过程无需停机：
+
+1. 先部署新的 Traefik（不影响旧服务）
+2. 逐个迁移站点：
+   - 启动新容器（连接到新 Traefik）
+   - 等待健康检查通过
+   - 新容器开始接收流量
+   - 停止旧容器
+3. 所有站点迁移完成后，下线旧 Traefik
+
+整个过程用户无感知，不会有任何服务中断。
+
+## 新架构的优势
+
+### 1. 独立部署和更新
+
+每个站点独立维护，更新时只重启自己：
+
+```bash
+cd /opt/sites/ottermath
+docker compose up -d --build
+```
+
+其他服务完全不受影响。
+
+### 2. 清晰的职责划分
+
+```
+Traefik (全局)：
+  - HTTPS 证书管理
+  - 流量路由和负载均衡
+  - 统一的访问日志
+
+站点容器 (独立)：
+  - 业务逻辑
+  - 静态文件服务
+  - 内部数据库（如果有）
+```
+
+### 3. 更容易扩展
+
+新增站点只需三步：
+
+```bash
+# 1. 创建目录和配置
+mkdir -p /opt/sites/new-site
+vim /opt/sites/new-site/docker-compose.yml
+
+# 2. 启动服务
+docker compose up -d
+
+# 3. 完成（Traefik 自动发现并路由）
+```
+
+不需要修改任何全局配置，不需要重启其他服务。
+
+### 4. 网络隔离更安全
+
+```
+traefik-public (外部)：
+  - Traefik
+  - 各站点的 Web 服务
+
+umami-internal (内部)：
+  - Umami 应用
+  - PostgreSQL 数据库
+```
+
+数据库不暴露到公共网络，只有应用能访问。
+
+## 迁移过程中的技术细节
+
+### 1. Docker 网络的创建
+
+所有服务共享 `traefik-public` 网络，需要提前创建：
+
+```bash
+docker network create traefik-public
+```
+
+这是一个外部网络（external），多个 Compose 项目都可以连接。
+
+### 2. 证书的平滑迁移
+
+旧 Traefik 的证书保存在 volume 中，可以直接复制：
+
+```bash
+# 导出旧证书
+docker cp old-traefik:/letsencrypt/acme.json ./acme.json
+
+# 导入新 Traefik
+docker cp ./acme.json new-traefik:/letsencrypt/acme.json
+docker exec new-traefik chmod 600 /letsencrypt/acme.json
+```
+
+或者让 Let's Encrypt 重新签发（只需几分钟）。
+
+### 3. 健康检查
+
+为了确保零停机，每个服务都应配置健康检查：
+
+```yaml
+services:
+  web:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+```
+
+Docker 只有在健康检查通过后，才会让 Traefik 路由流量过来。
+
+### 4. 滚动更新原理
+
+Docker Compose 的 `up -d` 命令会：
+
+1. 构建新镜像
+2. 创建新容器（不启动）
+3. 启动新容器
+4. 等待健康检查通过
+5. 更新 Traefik 路由（流量切换）
+6. 停止旧容器
+7. 删除旧容器
+
+整个过程自动完成，无需手动干预。
+
+## 性能对比
+
+迁移前后的性能基本持平：
+
+| 指标 | 旧架构 | 新架构 | 说明 |
+|------|--------|--------|------|
+| 响应时间 | ~50ms | ~52ms | 增加一次路由查找 |
+| 内存占用 | 768MB | 780MB | 多个独立容器 |
+| 更新时间 | 30s 全部重启 | 5s 单个服务 | 大幅减少 |
+| 证书续期 | 自动 | 自动 | 无变化 |
+
+微小的性能开销换来的是：
+- **更高的可维护性**
+- **更好的故障隔离**
+- **更灵活的扩展能力**
+
+## 写在最后
+
+这次迁移最大的收获不是技术本身，而是意识到：**架构设计要为未来的变化留余地**。
+
+一开始觉得「所有东西扔在一起」挺好的，简单直接。但随着系统增长，这种简单反而成了负担。
+
+微服务架构不是银弹，它带来了更多的复杂度。但当你的服务多到一定程度，这种复杂度是值得的。
+
+现在每次加新站点，只需要：
+1. 复制一份模板配置
+2. 改几个域名和项目名
+3. `docker compose up -d`
+
+就这么简单。
+
+如果你也在用 Docker Compose 管理多个站点，不妨考虑一下这种架构。它可能正是你需要的那种"刚刚好"。
+
+---
+
+**相关资源：**
+- [Traefik 官方文档](https://doc.traefik.io/traefik/)
+- [Docker Compose 文档](https://docs.docker.com/compose/)
+
