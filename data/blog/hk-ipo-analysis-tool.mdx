@@ -1,0 +1,184 @@
+---
+title: 用数据说话 - 港股打新能转钱么？
+date: '2025-12-19'
+tags: ['Python', '数据分析', '投资']
+draft: false
+summary: 朋友迷上港股打新，还用了10倍融资。我担心风险，但不想争论。于是写了个程序，统计最近一年港股首日收益。数据出来了，40%的平均收益率。但这个数字，真的能回答那个问题吗？
+---
+
+## 一个疑问
+
+朋友最近迷上了港股打新。
+
+不只是打新，还用上了10倍融资。每次申购要100港币手续费，融资200万的话，每天利息45元。
+
+我有点担心。不是担心亏钱，是担心那种小概率的极端风险——万一遇上破发，10倍杠杆下，账户可能直接爆仓。
+
+但我不想争论。争论没用，每个人对风险的感受不一样。
+
+我想要数据。
+
+如果长期打新，扣除申购成本和融资利息，收益到底如何？中签是小概率事件，但首日收益率是可以统计的。
+
+## 开始动手
+
+目标很简单：统计最近一年上市的港股，首日收盘相对发行价的收益率。
+
+技术选择也简单：Python + 富途API。富途有现成的行情接口，应该能拿到需要的数据。
+
+最初的设想是：
+1. 用API获取最近上市的股票列表
+2. 拿到每只股票的IPO发行价
+3. 获取首日K线数据
+4. 计算收益率
+
+看起来很直接。
+
+## 卡住了
+
+问题出在第二步。
+
+富途API有两个相关接口：
+- `get_ipo_list`：能拿到发行价，但只返回**即将上市**的股票
+- `get_stock_basicinfo`：能拿到上市日期，但**没有发行价**
+
+我需要的是历史数据，已经上市的股票。但这两个接口，一个只给未来，一个不给价格。
+
+卡住了。
+
+## 转折
+
+既然API没有，能不能让AI去查？
+
+这个想法有点荒谬，但值得试试。
+
+方案是这样的：
+1. 用`get_stock_basicinfo`获取已上市的股票和上市日期
+2. 用通义千问模型，开启联网搜索，让它去查每只股票的IPO发行价
+3. 并发请求，10个并发，提高效率
+4. 加上重试机制，最多重试3次
+
+代码实现在`ipo_fetcher.py`里：
+
+```python
+def get_ipo_price_from_ai(stock_code: str, stock_name: str, max_retries: int = 3) -> float:
+    """通过 qwen3-max 模型获取股票的 IPO 发行价"""
+    client = OpenAI(
+        api_key=os.getenv("QWEN_API_KEY"),
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            completion = client.chat.completions.create(
+                model="qwen3-max",
+                messages=[
+                    {"role": "user", "content": f"{stock_code} {stock_name} 港股 IPO 发行价格，直接返回数字，无需单位"},
+                ],
+                extra_body={"enable_search": True}
+            )
+            
+            content = completion.choices[0].message.content.strip()
+            
+            # 检查返回是否为纯数字
+            if re.match(r'^\d+\.?\d*$', content):
+                price = float(content)
+                return price
+            
+            # 尝试提取数字
+            match = re.search(r'(\d+\.?\d*)', content)
+            if match:
+                price = float(match.group(1))
+                if attempt < max_retries:
+                    continue  # 重试以获取更好的结果
+                return price
+                
+        except Exception as e:
+            if attempt < max_retries:
+                continue
+    
+    return 0.0  # 失败返回0
+```
+
+并发获取的逻辑：
+
+```python
+def fetch_ipo_prices_concurrent(stock_list: pd.DataFrame, max_workers: int = 10) -> pd.DataFrame:
+    """并发获取股票的 IPO 发行价"""
+    result = stock_list.copy()
+    result['ipo_price'] = 0.0
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(get_ipo_price_from_ai, row['code'], row['name']): idx
+            for idx, row in result.iterrows()
+        }
+        
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            price = future.result()
+            result.at[idx, 'ipo_price'] = price
+    
+    # 过滤掉价格为0的股票
+    result = result[result['ipo_price'] > 0].copy()
+    return result
+```
+
+这个方案有点野，但它工作了。
+
+## 数据出来了
+
+程序跑完，拿到了110只股票的数据。
+
+部分结果：
+
+| 股票代码 | 名称 | 上市日期 | 发行价 | 首日收盘价 | 收益率 |
+|---------|------|---------|--------|-----------|--------|
+| HK.02655 | GUOXIA TECH | 2025-12-16 | 20.1 | 43.8 | 117.91% |
+| HK.02659 | BAO PHARMA-B | 2025-12-10 | 26.38 | 63.0 | 138.82% |
+| HK.02687 | ABLE DIGITAL | 2025-12-08 | 67.5 | 126.4 | 87.26% |
+| HK.02658 | TIANYU SEMI | 2025-12-05 | 58.0 | 40.5 | -30.17% |
+| HK.02408 | XIAO NOODLES | 2025-12-05 | 7.04 | 5.08 | -27.84% |
+| HK.02718 | MININGLAMP-W | 2025-11-03 | 141.0 | 290.6 | 106.1% |
+| HK.01384 | DEEPEXI TECH | 2025-10-28 | 26.66 | 66.8 | 150.56% |
+| HK.02650 | ZHIDA TECH | 2025-10-10 | 66.92 | 195.5 | 192.14% |
+| HK.02560 | CONCH MAT TECH | 2025-01-09 | 3.0 | 1.39 | -53.81% |
+
+统计结果：
+- 样本数：110只
+- 平均收益率：40.85%
+- 中位数：20.34%
+- 最高收益：330.0%（GOLDEN LEAF INT）
+- 最低收益：-53.81%（CONCH MAT TECH）
+- 正收益：76只（69.1%）
+- 负收益：34只（30.9%）
+
+## 数据不会给答案
+
+40%的平均收益率，看起来不错。
+
+但这个数字，不能直接回答"打新划不划算"。
+
+它没有告诉你：
+- 中签概率是多少
+- 申购100次，能中几次
+- 每次融资的利息成本
+- 破发时的心理压力
+- 极端亏损的承受能力
+
+数据只是数据。它呈现事实，但不给建议。
+
+我把这个程序和数据发给了朋友。她看了看，没说什么。
+
+我也没说什么。
+
+有些决定，数据帮不了忙。风险和收益的权衡，最终还是个人选择。
+
+我只是想知道，那个40%，到底是什么。
+
+现在我知道了。
+
+---
+
+*项目代码：[https://github.com/seanzou/futu](https://github.com/seanzou/futu)*
+

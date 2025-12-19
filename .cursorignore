@@ -3,4 +3,5 @@
 
 # 只保留 data 目录
 !/data/
+!/.cursor/
 
