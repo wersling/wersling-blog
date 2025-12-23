@@ -24,7 +24,7 @@ const projectsData: Project[] = [
   {
     title: 'AI训练师考试练习系统',
     description: `一个基于 React + Node.js 的全栈答题练习系统，前端使用 React + TypeScript + Vite，后端使用 Node.js + Express。`,
-    href: 'http://106.15.107.220:5173/',
+    href: 'https://ai-practice.wersling.cn',
   },
 ]
 
